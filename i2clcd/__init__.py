@@ -23,10 +23,7 @@ name = 'i2clcd'
 LCD_DAT = 0x01  # Mode - Sending data
 LCD_CMD = 0x00  # Mode - Sending command
 
-# LINE_1 = 0x80   # LCD RAM address for the 1st line
-# LINE_2 = 0xC0   # LCD RAM address for the 2nd line
-# LINE_3 = 0x94   # LCD RAM address for the 3rd line
-# LINE_4 = 0xD4   # LCD RAM address for the 4th line
+# LCD RAM addresses for lines 1-4
 LCD_LINES = (0x80, 0xC0, 0x94, 0xD4)
 
 # Character code for custom characters in CGRAM
@@ -34,17 +31,14 @@ CGRAM_CHR = (b'\x00', b'\x01', b'\x02', b'\x03', b'\x04', b'\x05', b'\x06', b'\x
 
 
 class i2clcd():
-    def __init__(self, i2c_bus=1, i2c_addr=0x27, lcd_width=16):
+    def __init__(self, i2c_bus=0, lcd_width=20):
         """
         initialize the connection with the LCD
-
-        i2c_bus:    the smbus where the LCD connected to,
-                    for Raspberry Pi, it should be 1 or 0 (depending on the model)
+        i2c_bus:    the i2c bus where the LCD is connected (0 => /dev/i2c-0 etc)
         i2c_addr:   I2C address of the adapter, usually 0x27, 0x20 or 0x3f
         lcd_width:  the width of the LCD, e.g. 16 for LCD1602, 20 for LCD2002/2004
         """
         self._bus = smbus.SMBus(i2c_bus)
-        self._i2c_addr = i2c_addr
         self._lcd_width = lcd_width
 
         self._backlight = True
@@ -55,8 +49,8 @@ class i2clcd():
         self._last_data = data
         self._bus.write_byte(self._i2c_addr, data)
 
-    def _pluse_en(self):
-        """proform a high level pulse to EN"""
+    def _pulse_en(self):
+        """emit a high level pulse to EN"""
 
         time.sleep(0)
         self._i2c_write(self._last_data | 0b00000100)
@@ -71,35 +65,42 @@ class i2clcd():
         data_L = ((data << 4) & 0xF0) | self._backlight * 0x08 | mode
 
         self._i2c_write(data_H)
-        self._pluse_en()
+        self._pulse_en()
 
         self._i2c_write(data_L)
-        self._pluse_en()
+        self._pulse_en()
 
         time.sleep(0.0001)
 
-    def init(self):
+    def init(self, i2c_addr):
         """
-        Initialize the LCD
+        Initialize the LCD on given address
         """
 
-        # setting LCD data interface to 4 bit
-        self._i2c_write(0x30)
-        self._pluse_en()
-        time.sleep(0.0041)
-        self._i2c_write(0x30)
-        self._pluse_en()
-        time.sleep(0.0001)
-        self._i2c_write(0x30)
-        self._pluse_en()
-        time.sleep(0.0001)
-        self._i2c_write(0x20)
-        self._pluse_en()
+        self._i2c_addr = i2c_addr
+        try:
+            # setting LCD data interface to 4 bit
+            self._i2c_write(0x30)
+            self._pulse_en()
+            time.sleep(0.0041)
+            self._i2c_write(0x30)
+            self._pulse_en()
+            time.sleep(0.0001)
+            self._i2c_write(0x30)
+            self._pulse_en()
+            time.sleep(0.0001)
+            self._i2c_write(0x20)
+            self._pulse_en()
 
-        self.write_byte(0x28, LCD_CMD)    # 00101000 Function set: interface 4bit, 2 lines, 5x8 font
-        self.write_byte(0x0C, LCD_CMD)    # 00001100 Display ON/OFF: display on, cursor off, cursor blink off
-        self.write_byte(0x06, LCD_CMD)    # 00000110 Entry Mode set: cursor move right, display not shift
-        self.clear()
+            self.write_byte(0x28, LCD_CMD)    # 00101000 Function set: interface 4bit, 2 lines, 5x8 font
+            self.write_byte(0x0C, LCD_CMD)    # 00001100 Display ON/OFF: display on, cursor off, cursor blink off
+            self.write_byte(0x06, LCD_CMD)    # 00000110 Entry Mode set: cursor move right, display not shift
+            self.clear()
+
+            return True
+
+        except OSError:
+            return False
 
     def clear(self):
         """
@@ -126,7 +127,6 @@ class i2clcd():
     def move_cursor(self, line, column):
         """
         Move the cursor to a new posotion
-
         line:   line number starts from 0
         column: column number starts from 0
         """
@@ -136,7 +136,6 @@ class i2clcd():
     def shift(self, direction='RIGHT', move_display=False):
         """
         Move the cursor and display left or right
-
         direction:      could be 'RIGHT' (default) or 'LEFT'
         move_display:   move the entire display and cursor, or only move the cursor
         """
@@ -154,12 +153,9 @@ class i2clcd():
     def write_CGRAM(self, chr_data, CGRAM_solt=0):
         """
         Write a custom character to CGRAM
-
         chr_data:     a tuple that stores the character model data
         CGRAM_solt:   int from 0 to 7 to determine where the font data is written
-
         NOTICE: re-setting the cursor position after calling this method, e.g.
-
         lcd.write_CGRAM((0x10, 0x06, 0x09, 0x08, 0x08, 0x09, 0x06, 0x00), 2)
         lcd.move_cursor(1, 0)
         lcd.print(b'New char: ' + i2clcd.CGRAM_CHR[2])
@@ -173,7 +169,6 @@ class i2clcd():
     def print(self, text):
         """
         Print a string at the current cursor position
-
         text:   bytes or str object, str object will be encoded with ASCII
         """
         if isinstance(text, str):
@@ -185,7 +180,6 @@ class i2clcd():
     def print_line(self, text, line, align='LEFT'):
         """
         Fill a whole line of the LCD with a string
-
         text:   bytes or str object, str object will be encoded with ASCII
         line:   line number starts from 0
         align:  could be 'LEFT' (default), 'RIGHT' or 'CENTER'
@@ -201,8 +195,10 @@ class i2clcd():
                 text = text + b' ' * blank_space
             elif align == 'RIGHT':
                 text = b' ' * blank_space + text
-            else:
+            elif align == 'CENTER':
                 text = b' ' * (blank_space // 2) + text + b' ' * (blank_space - blank_space // 2)
+            else:
+                raise Exception('alignment should be LEFT, RIGHT or CENTER')
         else:
             text = text[:self._lcd_width]
 
